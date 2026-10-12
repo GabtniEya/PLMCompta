@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { X, CreditCard, Lock, CheckCircle2, Loader2, ArrowLeft, Download, FileText } from 'lucide-react';
+import { X, CreditCard, Lock, CheckCircle2, Loader2, ArrowLeft, Download, FileText, ShieldCheck } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { useCart } from '@/context/CartContext';
 import { supabase } from '@/lib/supabase';
@@ -30,9 +30,22 @@ export default function CheckoutModal({ onClose }: CheckoutModalProps) {
     card_expiry: '',
     card_cvc: '',
   });
+  const cardDigits = form.card_number.replace(/\D/g, '');
+  const cardBrand = cardDigits.startsWith('4') ? 'VISA' : /^(5[1-5]|2[2-7])/.test(cardDigits) ? 'mastercard' : 'CARTE';
+  const testCardComplete = cardDigits.length >= 15 && /^\d{2}\/\d{2}$/.test(form.card_expiry) && /^\d{3,4}$/.test(form.card_cvc);
 
   const handleChange = (field: string, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleCardNumber = (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, 16);
+    handleChange('card_number', digits.replace(/(.{4})/g, '$1 ').trim());
+  };
+
+  const handleExpiry = (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, 4);
+    handleChange('card_expiry', digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits);
   };
 
   const downloadInvoice = () => {
@@ -94,15 +107,22 @@ export default function CheckoutModal({ onClose }: CheckoutModalProps) {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!paymeeEnabled && !testCardComplete) {
+      setErrorMsg('Complétez les informations de la carte de test. Aucune donnée bancaire réelle ne sera transmise.');
+      setStatus('error');
+      return;
+    }
     setStatus('processing');
     setErrorMsg('');
 
     try {
       const orderNum = `PLM-${Date.now().toString().slice(-8)}`;
+      const orderId = crypto.randomUUID();
 
-      const { data: orderData, error: orderError } = await supabase
+      const { error: orderError } = await supabase
         .from('orders')
         .insert({
+          id: orderId,
           order_number: orderNum,
           customer_name: form.customer_name,
           customer_email: form.customer_email,
@@ -112,14 +132,12 @@ export default function CheckoutModal({ onClose }: CheckoutModalProps) {
           status: 'pending',
           payment_method: 'card',
           notes: form.notes,
-        })
-        .select()
-        .single();
+        });
 
       if (orderError) throw orderError;
 
       const orderItems = items.map((item) => ({
-        order_id: orderData.id,
+        order_id: orderId,
         service_id: item.service.id,
         service_name: item.service.name,
         price_tnd: item.service.price_tnd,
@@ -145,7 +163,7 @@ export default function CheckoutModal({ onClose }: CheckoutModalProps) {
 
       const { data: payment, error: paymentError } = await supabase.functions.invoke('create-paymee-payment', {
         body: {
-          orderId: orderData.id,
+          orderId,
           orderNumber: orderNum,
           amount: totalPrice,
           customerName: form.customer_name,
@@ -299,12 +317,17 @@ export default function CheckoutModal({ onClose }: CheckoutModalProps) {
               <div>{paymeeEnabled ? <><p className="font-semibold text-slate-800">Paiement sécurisé via Paymee</p><p className="mt-1 text-sm text-slate-600">Après confirmation, vous serez redirigé vers la passerelle Paymee pour saisir votre carte tunisienne, internationale ou e-dinar.</p></> : <><p className="font-semibold text-slate-800">Paiement simulé</p><p className="mt-1 text-sm text-slate-600">Aucune carte ni compte n’est nécessaire. Une commande de test et sa facture PDF seront générées.</p></>}</div>
             </div>
             {!paymeeEnabled && <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 space-y-4">
-              <div className="flex items-center justify-between gap-3"><p className="text-sm font-semibold text-slate-700">Carte de test</p><button type="button" onClick={() => setForm((previous) => ({ ...previous, card_number: '4242 4242 4242 4242', card_expiry: '12/30', card_cvc: '123' }))} className="text-xs font-bold text-teal-700 hover:text-teal-900">Utiliser une carte test</button></div>
-              <div><label className="block text-xs font-medium text-slate-500 mb-1.5">Numéro de carte *</label><div className="relative"><input required={!paymeeEnabled} maxLength={19} value={form.card_number} onChange={(event) => handleChange('card_number', event.target.value)} className="w-full rounded-xl border border-slate-200 px-4 py-3 pr-11 font-mono text-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100" placeholder="4242 4242 4242 4242" /><CreditCard className="absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-300" /></div></div>
-              <div className="grid grid-cols-2 gap-4"><div><label className="block text-xs font-medium text-slate-500 mb-1.5">Expiration *</label><input required={!paymeeEnabled} maxLength={5} value={form.card_expiry} onChange={(event) => handleChange('card_expiry', event.target.value)} className="w-full rounded-xl border border-slate-200 px-4 py-3 font-mono text-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100" placeholder="12/30" /></div><div><label className="block text-xs font-medium text-slate-500 mb-1.5">CVC *</label><input required={!paymeeEnabled} maxLength={4} value={form.card_cvc} onChange={(event) => handleChange('card_cvc', event.target.value)} className="w-full rounded-xl border border-slate-200 px-4 py-3 font-mono text-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100" placeholder="123" /></div></div>
+              <div className="rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-teal-900 p-5 text-white shadow-lg">
+                <div className="flex items-center justify-between text-xs font-semibold tracking-widest text-teal-100"><span>PLM SECURE · DEMO</span><span className="rounded bg-white/15 px-2 py-1 normal-case tracking-normal">{cardBrand}</span></div>
+                <div className="mt-8 font-mono text-xl tracking-[0.18em]">{form.card_number || '•••• •••• •••• ••••'}</div>
+                <div className="mt-5 flex items-end justify-between"><div><p className="text-[10px] uppercase tracking-wider text-slate-300">Titulaire</p><p className="mt-1 text-sm font-semibold uppercase">{form.customer_name || 'VOTRE NOM'}</p></div><div><p className="text-[10px] uppercase tracking-wider text-slate-300">Expire</p><p className="mt-1 font-mono text-sm">{form.card_expiry || 'MM/AA'}</p></div></div>
+              </div>
+              <div className="flex items-center justify-between gap-3"><p className="text-sm font-semibold text-slate-700">Carte de test</p><button type="button" onClick={() => setForm((previous) => ({ ...previous, card_number: '4242 4242 4242 4242', card_expiry: '12/30', card_cvc: '123' }))} className="text-xs font-bold text-teal-700 hover:text-teal-900">Utiliser une carte Visa test</button></div>
+              <div><label className="block text-xs font-medium text-slate-500 mb-1.5">Numéro de carte *</label><div className="relative"><input required={!paymeeEnabled} inputMode="numeric" maxLength={19} value={form.card_number} onChange={(event) => handleCardNumber(event.target.value)} className="w-full rounded-xl border border-slate-200 px-4 py-3 pr-20 font-mono text-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100" placeholder="4242 4242 4242 4242" /><span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">{cardBrand}</span></div></div>
+              <div className="grid grid-cols-2 gap-4"><div><label className="block text-xs font-medium text-slate-500 mb-1.5">Expiration *</label><input required={!paymeeEnabled} inputMode="numeric" maxLength={5} value={form.card_expiry} onChange={(event) => handleExpiry(event.target.value)} className="w-full rounded-xl border border-slate-200 px-4 py-3 font-mono text-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100" placeholder="12/30" /></div><div><label className="block text-xs font-medium text-slate-500 mb-1.5">CVC *</label><input required={!paymeeEnabled} inputMode="numeric" maxLength={4} value={form.card_cvc} onChange={(event) => handleChange('card_cvc', event.target.value.replace(/\D/g, ''))} className="w-full rounded-xl border border-slate-200 px-4 py-3 font-mono text-sm outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100" placeholder="123" /></div></div>
             </div>}
             <p className="text-xs text-slate-400 mt-2 flex items-center gap-1.5">
-              <Lock className="w-3.5 h-3.5" />
+              <ShieldCheck className="w-3.5 h-3.5" />
               {paymeeEnabled ? 'Les informations de carte ne transitent jamais par PLM Ressource.' : 'Utilisez seulement les valeurs de test : elles ne sont jamais envoyées ni enregistrées.'}
             </p>
           </div>

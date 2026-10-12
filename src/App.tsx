@@ -13,6 +13,7 @@ import CartDrawer from '@/components/CartDrawer';
 import CheckoutModal from '@/components/CheckoutModal';
 import AdminPanel from '@/components/AdminPanel';
 import AdminLogin from '@/components/AdminLogin';
+import Chatbot from '@/components/Chatbot';
 
 const fallbackServiceImages = [
   'https://images.pexels.com/photos/3184423/pexels-photo-3184423.jpeg?auto=compress&cs=tinysrgb&w=1200',
@@ -123,6 +124,7 @@ function App() {
 
         <CartDrawer onCheckout={() => setCheckoutOpen(true)} />
         {checkoutOpen && <CheckoutModal onClose={() => setCheckoutOpen(false)} />}
+        <Chatbot services={services} onNavigate={handleNavigate} />
       </div>
     </CartProvider>
   );
